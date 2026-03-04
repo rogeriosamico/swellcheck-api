@@ -3,7 +3,7 @@ const cors = require("cors");
 const fetch = require("node-fetch");
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: "*" }));
 
 const BEACHES = {
   "Paiva":             { lat: -8.3108, lng: -34.9700 },
@@ -38,7 +38,7 @@ app.get("/forecast", async (req, res) => {
     const json = await response.json();
 
     if (!json.hours || json.hours.length === 0) {
-      return res.status(502).json({ error: "Sem dados para essa data." });
+      return res.status(502).json({ error: "Sem dados para essa data.", debug: json });
     }
 
     // Média dos valores do dia
