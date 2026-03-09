@@ -24,7 +24,17 @@ function getMidnightUTC() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).getTime();
 }
 
-// Detecta se o vento é onshore ou offshore baseado na direção da onda e do vento
+// Calcula energia do swell normalizada de 0 a 10
+// Fórmula: swellHeight² × swellPeriod (proporcional a joules)
+// Faixas: 0–50 = fraco, 50–200 = moderado, 200–800 = forte, 800+ = muito forte
+function calcSwellEnergy(swellHeight, swellPeriod) {
+  if (!swellHeight || !swellPeriod) return 0;
+  const raw = Math.pow(swellHeight, 2) * swellPeriod;
+  if (raw <= 50)  return Math.round((raw / 50) * 3);           // 0–3
+  if (raw <= 200) return Math.round(3 + ((raw - 50) / 150) * 2);   // 3–5
+  if (raw <= 800) return Math.round(5 + ((raw - 200) / 600) * 3);  // 5–8
+  return Math.min(10, Math.round(8 + ((raw - 800) / 400) * 2));    // 8–10
+}
 // Retorna: "offshore", "cross", "onshore"
 function getWindType(windDirDeg, swellDirDeg) {
   if (windDirDeg == null || swellDirDeg == null) return "cross";
@@ -140,14 +150,15 @@ app.get("/forecast", async (req, res) => {
 
     const data = {
       beach, date, cond,
-      height:     waveHeight  ? waveHeight.toFixed(1)  : "0.0",
+      height:      waveHeight  ? waveHeight.toFixed(1)  : "0.0",
       swellHeight: swellHeight ? swellHeight.toFixed(1) : "0.0",
       swellPeriod: swellPeriod ? Math.round(swellPeriod) : 0,
       swellDir,
-      windSpeed:  windSpeed   ? Math.round(windSpeed)  : 0,
+      swellEnergy,
+      windSpeed:   windSpeed   ? Math.round(windSpeed)  : 0,
       windDir,
       windType,
-      period:     wavePeriod  ? Math.round(wavePeriod) : 0,
+      period:      wavePeriod  ? Math.round(wavePeriod) : 0,
     };
 
     cache[cacheKey] = { data, expiresAt: getMidnightUTC() };
