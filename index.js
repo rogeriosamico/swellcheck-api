@@ -12,7 +12,6 @@ const BEACHES = {
   "Maracaípe":         { lat: -8.5328, lng: -35.0072 },
 };
 
-// Cache em memória
 const cache = {};
 
 function isCacheValid(entry) {
@@ -24,42 +23,33 @@ function getMidnightUTC() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).getTime();
 }
 
-// Calcula energia do swell normalizada de 0 a 10
-// Fórmula: swellHeight² × swellPeriod (proporcional a joules)
-// Faixas: 0–50 = fraco, 50–200 = moderado, 200–800 = forte, 800+ = muito forte
 function calcSwellEnergy(swellHeight, swellPeriod) {
   if (!swellHeight || !swellPeriod) return 0;
   const raw = Math.pow(swellHeight, 2) * swellPeriod;
-  if (raw <= 50)  return Math.round((raw / 50) * 3);           // 0–3
-  if (raw <= 200) return Math.round(3 + ((raw - 50) / 150) * 2);   // 3–5
-  if (raw <= 800) return Math.round(5 + ((raw - 200) / 600) * 3);  // 5–8
-  return Math.min(10, Math.round(8 + ((raw - 800) / 400) * 2));    // 8–10
+  if (raw <= 50)  return Math.round((raw / 50) * 3);
+  if (raw <= 200) return Math.round(3 + ((raw - 50) / 150) * 2);
+  if (raw <= 800) return Math.round(5 + ((raw - 200) / 600) * 3);
+  return Math.min(10, Math.round(8 + ((raw - 800) / 400) * 2));
 }
-// Retorna: "offshore", "cross", "onshore"
+
 function getWindType(windDirDeg, swellDirDeg) {
   if (windDirDeg == null || swellDirDeg == null) return "cross";
   let diff = Math.abs(windDirDeg - swellDirDeg);
   if (diff > 180) diff = 360 - diff;
-  // Vento vindo na mesma direção da onda = onshore
-  // Vento vindo em direção oposta = offshore
   if (diff < 45) return "onshore";
   if (diff > 135) return "offshore";
   return "cross";
 }
 
-// Lógica de classificação combinando swell, período, vento e altura total
 function classify({ swellHeight, swellPeriod, waveHeight, windSpeed, windType }) {
-  // Sem swell e onda fraca = flat
   if ((swellHeight == null || swellHeight < 0.2) && (waveHeight == null || waveHeight < 0.3)) {
     return "flat";
   }
 
-  // Usa swell como referência principal, fallback para wave height
   const h = swellHeight || waveHeight || 0;
   const period = swellPeriod || 0;
   const wind = windSpeed || 0;
 
-  // Classifica condição base pela altura do swell
   let base;
   if (h < 0.3)       base = "flat";
   else if (h < 0.8)  base = "marola";
@@ -68,27 +58,18 @@ function classify({ swellHeight, swellPeriod, waveHeight, windSpeed, windType })
 
   const order = ["flat", "marola", "bom", "storm"];
 
-  // Ajuste por período do swell
-  // Período longo (10s+) melhora a condição, período muito curto piora
   if (period >= 10 && base === "marola") base = "bom";
   if (period < 6 && base === "bom")     base = "marola";
 
-  // Ajuste por vento
   if (windType === "onshore") {
     if (wind > 25) {
-      // Vento onshore forte: rebaixa 2 níveis ou vai para storm se onda grande
-      const idx = order.indexOf(base);
       if (base === "bom" || base === "storm") base = "storm";
-      else base = order[Math.max(0, idx - 2)];
+      else base = order[Math.max(0, order.indexOf(base) - 2)];
     } else if (wind > 15) {
-      // Vento onshore moderado: rebaixa 1 nível
-      const idx = order.indexOf(base);
-      base = order[Math.max(0, idx - 1)];
+      base = order[Math.max(0, order.indexOf(base) - 1)];
     }
   } else if (windType === "offshore" && wind < 20) {
-    // Vento offshore leve: melhora 1 nível (até bom)
-    const idx = order.indexOf(base);
-    if (base !== "storm") base = order[Math.min(2, idx + 1)];
+    if (base !== "storm") base = order[Math.min(2, order.indexOf(base) + 1)];
   }
 
   return base;
@@ -132,21 +113,21 @@ app.get("/forecast", async (req, res) => {
       return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
     };
 
-    const waveHeight   = avg(marineJson.hourly.wave_height);
-    const wavePeriod   = avg(marineJson.hourly.wave_period);
-    const swellHeight  = avg(marineJson.hourly.swell_wave_height);
-    const swellPeriod  = avg(marineJson.hourly.swell_wave_period);
-    const swellDirDeg  = avg(marineJson.hourly.swell_wave_direction);
-    const windSpeed    = avg(windJson.hourly.wind_speed_10m);
-    const windDirDeg   = avg(windJson.hourly.wind_direction_10m);
+    const waveHeight  = avg(marineJson.hourly.wave_height);
+    const wavePeriod  = avg(marineJson.hourly.wave_period);
+    const swellHeight = avg(marineJson.hourly.swell_wave_height);
+    const swellPeriod = avg(marineJson.hourly.swell_wave_period);
+    const swellDirDeg = avg(marineJson.hourly.swell_wave_direction);
+    const windSpeed   = avg(windJson.hourly.wind_speed_10m);
+    const windDirDeg  = avg(windJson.hourly.wind_direction_10m);
 
     const dirs = ["N","NE","E","SE","S","SO","O","NO"];
     const windDir  = windDirDeg  != null ? dirs[Math.round(windDirDeg  / 45) % 8] : "—";
     const swellDir = swellDirDeg != null ? dirs[Math.round(swellDirDeg / 45) % 8] : "—";
 
-    const windType = getWindType(windDirDeg, swellDirDeg);
-
-    const cond = classify({ swellHeight, swellPeriod, waveHeight, windSpeed, windType });
+    const windType    = getWindType(windDirDeg, swellDirDeg);
+    const swellEnergy = calcSwellEnergy(swellHeight, swellPeriod);
+    const cond        = classify({ swellHeight, swellPeriod, waveHeight, windSpeed, windType });
 
     const data = {
       beach, date, cond,
