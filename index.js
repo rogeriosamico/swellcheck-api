@@ -18,7 +18,6 @@ const BEACHES = {
 };
 
 const TIDE_API = "https://tabuamare.devtu.qzz.io/api/v2";
-
 const cache = {};
 
 function isCacheValid(entry) {
@@ -34,10 +33,11 @@ function calcSwellEnergy(swellHeight, swellPeriod) {
   if (!swellHeight || !swellPeriod) return { score: 0, kj: 0 };
   const kj = Math.round(Math.pow(swellHeight, 2) * swellPeriod * 100);
   let score;
-  if (kj <= 100)  score = Math.round((kj / 100) * 3);
-  else if (kj <= 300) score = Math.round(3 + ((kj - 100) / 200) * 2);
-  else if (kj <= 800) score = Math.round(5 + ((kj - 300) / 500) * 3);
-  else score = Math.min(10, Math.round(8 + ((kj - 800) / 400) * 2));
+  if (kj < 500)        score = Math.round((kj / 500) * 2);
+  else if (kj < 1000)  score = Math.round(2 + ((kj - 500) / 500) * 2);
+  else if (kj < 2000)  score = Math.round(4 + ((kj - 1000) / 1000) * 2);
+  else if (kj < 3000)  score = Math.round(6 + ((kj - 2000) / 1000) * 2);
+  else                 score = Math.min(10, Math.round(8 + ((kj - 3000) / 1000) * 2));
   return { score, kj };
 }
 
@@ -101,48 +101,61 @@ app.get("/forecast", async (req, res) => {
 
     if (!marineJson.hourly || !windJson.hourly) return res.status(502).json({ error: "Sem dados para essa data." });
 
-    const hours = marineJson.hourly.time;
-    const dayIdx = hours.reduce((acc, t, i) => {
-      const h = new Date(t).getHours();
-      if (h >= 6 && h <= 18) acc.push(i);
-      return acc;
-    }, []);
-
-    const avg = (arr) => {
-      if (!arr) return null;
-      const vals = dayIdx.map(i => arr[i]).filter(v => v != null);
-      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-    };
-
-    const waveHeight  = avg(marineJson.hourly.wave_height);
-    const wavePeriod  = avg(marineJson.hourly.wave_period);
-    const swellHeight = avg(marineJson.hourly.swell_wave_height);
-    const swellPeriod = avg(marineJson.hourly.swell_wave_period);
-    const swellDirDeg = avg(marineJson.hourly.swell_wave_direction);
-    const windSpeed   = avg(windJson.hourly.wind_speed_10m);
-    const windDirDeg  = avg(windJson.hourly.wind_direction_10m);
-
     const dirs = ["N","NE","E","SE","S","SO","O","NO"];
-    const windDir  = windDirDeg  != null ? dirs[Math.round(windDirDeg  / 45) % 8] : "—";
-    const swellDir = swellDirDeg != null ? dirs[Math.round(swellDirDeg / 45) % 8] : "—";
 
-    const windType = getWindType(windDirDeg, swellDirDeg);
-    const { score: swellEnergy, kj: swellKj } = calcSwellEnergy(swellHeight, swellPeriod);
-    const cond = classify({ swellHeight, swellPeriod, waveHeight, windSpeed, windType });
+    // Gera dados hora a hora (0-23)
+    const hours = [];
+    for (let i = 0; i < 24; i++) {
+      const waveHeight  = marineJson.hourly.wave_height?.[i] ?? null;
+      const wavePeriod  = marineJson.hourly.wave_period?.[i] ?? null;
+      const swellHeight = marineJson.hourly.swell_wave_height?.[i] ?? null;
+      const swellPeriod = marineJson.hourly.swell_wave_period?.[i] ?? null;
+      const swellDirDeg = marineJson.hourly.swell_wave_direction?.[i] ?? null;
+      const windSpeed   = windJson.hourly.wind_speed_10m?.[i] ?? null;
+      const windDirDeg  = windJson.hourly.wind_direction_10m?.[i] ?? null;
 
-    const data = {
-      beach, date, cond,
-      height:      waveHeight  ? waveHeight.toFixed(1)  : "0.0",
-      swellHeight: swellHeight ? swellHeight.toFixed(1) : "0.0",
-      swellPeriod: swellPeriod ? Math.round(swellPeriod) : 0,
-      swellDir, swellEnergy, swellKj,
-      windSpeed:   windSpeed   ? Math.round(windSpeed)  : 0,
-      windDir, windType,
-      period:      wavePeriod  ? Math.round(wavePeriod) : 0,
-    };
+      const windDir  = windDirDeg  != null ? dirs[Math.round(windDirDeg  / 45) % 8] : "—";
+      const swellDir = swellDirDeg != null ? dirs[Math.round(swellDirDeg / 45) % 8] : "—";
+      const windType = getWindType(windDirDeg, swellDirDeg);
+      const { score: swellEnergy, kj: swellKj } = calcSwellEnergy(swellHeight, swellPeriod);
+      const cond = classify({ swellHeight, swellPeriod, waveHeight, windSpeed, windType });
 
+      hours.push({
+        hour: i,
+        cond,
+        height:      waveHeight  ? waveHeight.toFixed(1)  : "0.0",
+        swellHeight: swellHeight ? swellHeight.toFixed(1) : "0.0",
+        swellPeriod: swellPeriod ? Math.round(swellPeriod) : 0,
+        swellDir,
+        swellEnergy,
+        swellKj,
+        windSpeed:   windSpeed   ? Math.round(windSpeed)  : 0,
+        windDir,
+        windType,
+        period:      wavePeriod  ? Math.round(wavePeriod) : 0,
+      });
+    }
+
+    // Calcula veredito do dia (média 6h-18h)
+    const dayHours = hours.filter(h => h.hour >= 6 && h.hour <= 18);
+    const condOrder = { storm: 0, bom: 1, marola: 2, flat: 3 };
+    const dayCond = dayHours.reduce((best, h) =>
+      (condOrder[h.cond] ?? 99) < (condOrder[best.cond] ?? 99) ? h : best
+    , dayHours[0]).cond;
+
+    // Melhor bloco do dia (sequência mais longa de "bom")
+    let bestStart = null, bestEnd = null, curStart = null;
+    dayHours.forEach((h, i) => {
+      if (h.cond === "bom" || h.cond === "storm") {
+        if (curStart === null) curStart = h.hour;
+        bestStart = curStart; bestEnd = h.hour;
+      } else { curStart = null; }
+    });
+
+    const data = { beach, date, cond: dayCond, bestStart, bestEnd, hours };
     cache[cacheKey] = { data, expiresAt: getMidnightUTC() };
     res.json(data);
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Erro ao buscar dados." });
@@ -164,11 +177,10 @@ app.get("/tide", async (req, res) => {
   try {
     const response = await fetch(`${TIDE_API}/tabua-mare/${harbor}/${month}/[${day}]`);
     const json = await response.json();
+    const tideHours = json?.data?.[0]?.months?.[0]?.days?.[0]?.hours;
+    if (!tideHours) return res.status(502).json({ error: "Sem dados de maré para essa data." });
 
-    const hours = json?.data?.[0]?.months?.[0]?.days?.[0]?.hours;
-    if (!hours) return res.status(502).json({ error: "Sem dados de maré para essa data." });
-
-    const tides = hours.map(h => ({
+    const tides = tideHours.map(h => ({
       hour: h.hour.substring(0, 5),
       level: parseFloat(h.level.toFixed(2)),
     }));
