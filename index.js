@@ -6,10 +6,15 @@ const app = express();
 app.use(cors({ origin: "*" }));
 
 const BEACHES = {
-  "Paiva":             { lat: -8.3108, lng: -34.9700, state: "pe" },
-  "Itapuama":          { lat: -8.3989, lng: -35.0286, state: "pe" },
-  "Porto de Galinhas": { lat: -8.5075, lng: -35.0028, state: "pe" },
-  "Maracaípe":         { lat: -8.5328, lng: -35.0072, state: "pe" },
+  "Paiva":             { lat: -8.3108,  lng: -34.9700, state: "pe" },
+  "Itapuama":          { lat: -8.3989,  lng: -35.0286, state: "pe" },
+  "Porto de Galinhas": { lat: -8.5075,  lng: -35.0028, state: "pe" },
+  "Maracaípe":         { lat: -8.5328,  lng: -35.0072, state: "pe" },
+  "Madeiro":           { lat: -6.2283,  lng: -35.0508, state: "rn" },
+  "Baía Formosa":      { lat: -6.3728,  lng: -35.0089, state: "rn" },
+  "Cacimba do Padre":  { lat: -3.8397,  lng: -32.4203, state: "pe" },
+  "Jericoacoara":      { lat: -2.7975,  lng: -40.5128, state: "ce" },
+  "Tourinhos":         { lat: -5.1089,  lng: -35.4908, state: "rn" },
 };
 
 const TIDE_API = "https://tabuamare.devtu.qzz.io/api/v2";
@@ -26,16 +31,24 @@ function getMidnightUTC() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).getTime();
 }
 
+// Energia da onda por metro de frente de onda (J/m)
+// P = (ρ × g² × H² × T) / (32π) → E = P × T
+// ρ = 1025 kg/m³, g = 9.8 m/s²
 function calcSwellEnergy(swellHeight, swellPeriod) {
   if (!swellHeight || !swellPeriod) return { score: 0, kj: 0 };
-  const raw = Math.pow(swellHeight, 2) * swellPeriod;
-  const kj = Math.round(raw * 10);
+  const rho = 1025, g = 9.8;
+  const power = (rho * Math.pow(g, 2) * Math.pow(swellHeight, 2) * swellPeriod) / (32 * Math.PI);
+  const joules = Math.round(power * swellPeriod); // J/m
+
+  // Normaliza para escala 0-10
+  // Faixas: <500 fraco, 500-2000 moderado, 2000-5000 forte, >5000 muito forte
   let score;
-  if (raw <= 50)  score = Math.round((raw / 50) * 3);
-  else if (raw <= 200) score = Math.round(3 + ((raw - 50) / 150) * 2);
-  else if (raw <= 800) score = Math.round(5 + ((raw - 200) / 600) * 3);
-  else score = Math.min(10, Math.round(8 + ((raw - 800) / 400) * 2));
-  return { score, kj };
+  if (joules <= 500)  score = Math.round((joules / 500) * 3);
+  else if (joules <= 2000) score = Math.round(3 + ((joules - 500) / 1500) * 2);
+  else if (joules <= 5000) score = Math.round(5 + ((joules - 2000) / 3000) * 3);
+  else score = Math.min(10, Math.round(8 + ((joules - 5000) / 2000) * 2));
+
+  return { score, kj: joules };
 }
 
 function getWindType(windDirDeg, swellDirDeg) {
