@@ -18,7 +18,6 @@ const BEACHES = {
 };
 
 const TIDE_API = "https://tabuamare.devtu.qzz.io/api/v2";
-const TIDE_HARBOR = "pe03"; // Porto de Suape — mais próximo de todas as praias
 
 const cache = {};
 
@@ -31,20 +30,14 @@ function getMidnightUTC() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).getTime();
 }
 
-// Energia da onda (Kj) — fórmula calibrada com Surfguru
-// E = H² × T × 100
 function calcSwellEnergy(swellHeight, swellPeriod) {
   if (!swellHeight || !swellPeriod) return { score: 0, kj: 0 };
   const kj = Math.round(Math.pow(swellHeight, 2) * swellPeriod * 100);
-
-  // Normaliza para escala 0-10
-  // <100 Kj fraco, 100-300 moderado, 300-800 forte, >800 muito forte
   let score;
   if (kj <= 100)  score = Math.round((kj / 100) * 3);
   else if (kj <= 300) score = Math.round(3 + ((kj - 100) / 200) * 2);
   else if (kj <= 800) score = Math.round(5 + ((kj - 300) / 500) * 3);
   else score = Math.min(10, Math.round(8 + ((kj - 800) / 400) * 2));
-
   return { score, kj };
 }
 
@@ -89,7 +82,6 @@ app.get("/clear-cache", (req, res) => {
   res.json({ cleared: count });
 });
 
-// Rota de previsão de surf
 app.get("/forecast", async (req, res) => {
   const { beach, date } = req.query;
   if (!beach || !BEACHES[beach]) return res.status(400).json({ error: "Praia inválida." });
@@ -157,20 +149,20 @@ app.get("/forecast", async (req, res) => {
   }
 });
 
-// Rota de maré
 app.get("/tide", async (req, res) => {
-  const { date } = req.query;
+  const { date, beach } = req.query;
   if (!date) return res.status(400).json({ error: "Data obrigatória." });
 
-  const cacheKey = `tide|${date}`;
+  const harbor = (beach && BEACHES[beach]) ? BEACHES[beach].harbor : "pe03";
+  const cacheKey = `tide|${harbor}|${date}`;
   if (isCacheValid(cache[cacheKey])) return res.json({ ...cache[cacheKey].data, cached: true });
 
-  const d = new Date(date + "T12:00:00");
-  const month = d.getMonth() + 1;
-  const day = d.getDate();
+  const dateObj = new Date(date + "T12:00:00");
+  const month = dateObj.getMonth() + 1;
+  const day = dateObj.getDate();
 
   try {
-    const response = await fetch(`${TIDE_API}/tabua-mare/${TIDE_HARBOR}/${month}/[${day}]`);
+    const response = await fetch(`${TIDE_API}/tabua-mare/${harbor}/${month}/[${day}]`);
     const json = await response.json();
 
     const hours = json?.data?.[0]?.months?.[0]?.days?.[0]?.hours;
@@ -181,7 +173,7 @@ app.get("/tide", async (req, res) => {
       level: parseFloat(h.level.toFixed(2)),
     }));
 
-    const data = { date, tides };
+    const data = { date, harbor, tides };
     cache[cacheKey] = { data, expiresAt: getMidnightUTC() };
     res.json(data);
   } catch (err) {
