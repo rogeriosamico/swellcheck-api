@@ -83,6 +83,12 @@ function classify({ swellHeight, swellPeriod, waveHeight, windSpeed, windType })
   return base;
 }
 
+app.get("/clear-cache", (req, res) => {
+  const count = Object.keys(cache).length;
+  for (const key in cache) delete cache[key];
+  res.json({ cleared: count });
+});
+
 // Rota de previsão de surf
 app.get("/forecast", async (req, res) => {
   const { beach, date } = req.query;
