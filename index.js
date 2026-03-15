@@ -31,24 +31,21 @@ function getMidnightUTC() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).getTime();
 }
 
-// Energia da onda por metro de frente de onda (J/m)
-// P = (ρ × g² × H² × T) / (32π) → E = P × T
-// ρ = 1025 kg/m³, g = 9.8 m/s²
+// Energia da onda (Kj) — fórmula calibrada com Surfguru
+// E = H² × T × 100
 function calcSwellEnergy(swellHeight, swellPeriod) {
   if (!swellHeight || !swellPeriod) return { score: 0, kj: 0 };
-  const rho = 1025, g = 9.8;
-  const power = (rho * Math.pow(g, 2) * Math.pow(swellHeight, 2) * swellPeriod) / (32 * Math.PI);
-  const joules = Math.round(power * swellPeriod); // J/m
+  const kj = Math.round(Math.pow(swellHeight, 2) * swellPeriod * 100);
 
   // Normaliza para escala 0-10
-  // Faixas: <500 fraco, 500-2000 moderado, 2000-5000 forte, >5000 muito forte
+  // <100 Kj fraco, 100-300 moderado, 300-800 forte, >800 muito forte
   let score;
-  if (joules <= 500)  score = Math.round((joules / 500) * 3);
-  else if (joules <= 2000) score = Math.round(3 + ((joules - 500) / 1500) * 2);
-  else if (joules <= 5000) score = Math.round(5 + ((joules - 2000) / 3000) * 3);
-  else score = Math.min(10, Math.round(8 + ((joules - 5000) / 2000) * 2));
+  if (kj <= 100)  score = Math.round((kj / 100) * 3);
+  else if (kj <= 300) score = Math.round(3 + ((kj - 100) / 200) * 2);
+  else if (kj <= 800) score = Math.round(5 + ((kj - 300) / 500) * 3);
+  else score = Math.min(10, Math.round(8 + ((kj - 800) / 400) * 2));
 
-  return { score, kj: joules };
+  return { score, kj };
 }
 
 function getWindType(windDirDeg, swellDirDeg) {
