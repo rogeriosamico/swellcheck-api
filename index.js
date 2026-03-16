@@ -76,6 +76,76 @@ function classify({ swellHeight, swellPeriod, waveHeight, windSpeed, windType })
   return base;
 }
 
+// ─── Lógica de forecast extraída para reuso ──────────────────────────────────
+async function getForecastData(beach, date) {
+  const cacheKey = `forecast|${beach}|${date}`;
+  if (isCacheValid(cache[cacheKey])) return cache[cacheKey].data;
+
+  const { lat, lng } = BEACHES[beach];
+  const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&hourly=wave_height,wave_period,swell_wave_height,swell_wave_period,swell_wave_direction&timezone=America%2FRecife&start_date=${date}&end_date=${date}`;
+  const windUrl   = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=wind_speed_10m,wind_direction_10m&timezone=America%2FRecife&start_date=${date}&end_date=${date}`;
+
+  const [marineRes, windRes] = await Promise.all([fetch(marineUrl), fetch(windUrl)]);
+  const marineJson = await marineRes.json();
+  const windJson   = await windRes.json();
+
+  if (!marineJson.hourly || !windJson.hourly) throw new Error("Sem dados para essa data.");
+
+  const dirs = ["N","NE","E","SE","S","SO","O","NO"];
+  const hours = [];
+
+  for (let i = 0; i < 24; i++) {
+    const waveHeight  = marineJson.hourly.wave_height?.[i] ?? null;
+    const wavePeriod  = marineJson.hourly.wave_period?.[i] ?? null;
+    const swellHeight = marineJson.hourly.swell_wave_height?.[i] ?? null;
+    const swellPeriod = marineJson.hourly.swell_wave_period?.[i] ?? null;
+    const swellDirDeg = marineJson.hourly.swell_wave_direction?.[i] ?? null;
+    const windSpeed   = windJson.hourly.wind_speed_10m?.[i] ?? null;
+    const windDirDeg  = windJson.hourly.wind_direction_10m?.[i] ?? null;
+
+    const windDir  = windDirDeg  != null ? dirs[Math.round(windDirDeg  / 45) % 8] : "—";
+    const swellDir = swellDirDeg != null ? dirs[Math.round(swellDirDeg / 45) % 8] : "—";
+    const windType = getWindType(windDirDeg, swellDirDeg);
+    const { score: swellEnergy, kj: swellKj } = calcSwellEnergy(swellHeight, swellPeriod);
+    const cond = classify({ swellHeight, swellPeriod, waveHeight, windSpeed, windType });
+
+    hours.push({
+      hour: i,
+      cond,
+      height:      waveHeight  ? waveHeight.toFixed(1)  : "0.0",
+      swellHeight: swellHeight ? swellHeight.toFixed(1) : "0.0",
+      swellPeriod: swellPeriod ? Math.round(swellPeriod) : 0,
+      swellDir,
+      swellEnergy,
+      swellKj,
+      windSpeed:   windSpeed   ? Math.round(windSpeed)  : 0,
+      windDir,
+      windType,
+      period:      wavePeriod  ? Math.round(wavePeriod) : 0,
+    });
+  }
+
+  const dayHours = hours.filter(h => h.hour >= 6 && h.hour <= 18);
+  const condOrder = { storm: 0, bom: 1, marola: 2, flat: 3 };
+  const dayCond = dayHours.reduce((best, h) =>
+    (condOrder[h.cond] ?? 99) < (condOrder[best.cond] ?? 99) ? h : best
+  , dayHours[0]).cond;
+
+  let bestStart = null, bestEnd = null, curStart = null;
+  dayHours.forEach(h => {
+    if (h.cond === "bom" || h.cond === "storm") {
+      if (curStart === null) curStart = h.hour;
+      bestStart = curStart; bestEnd = h.hour;
+    } else { curStart = null; }
+  });
+
+  const data = { beach, date, cond: dayCond, bestStart, bestEnd, hours };
+  cache[cacheKey] = { data, expiresAt: getMidnightUTC() };
+  return data;
+}
+
+// ─── Rotas ───────────────────────────────────────────────────────────────────
+
 app.get("/clear-cache", (req, res) => {
   const count = Object.keys(cache).length;
   for (const key in cache) delete cache[key];
@@ -87,81 +157,33 @@ app.get("/forecast", async (req, res) => {
   if (!beach || !BEACHES[beach]) return res.status(400).json({ error: "Praia inválida." });
   if (!date) return res.status(400).json({ error: "Data obrigatória." });
 
-  const cacheKey = `forecast|${beach}|${date}`;
-  if (isCacheValid(cache[cacheKey])) return res.json({ ...cache[cacheKey].data, cached: true });
-
-  const { lat, lng } = BEACHES[beach];
-  const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&hourly=wave_height,wave_period,swell_wave_height,swell_wave_period,swell_wave_direction&timezone=America%2FRecife&start_date=${date}&end_date=${date}`;
-  const windUrl   = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=wind_speed_10m,wind_direction_10m&timezone=America%2FRecife&start_date=${date}&end_date=${date}`;
-
   try {
-    const [marineRes, windRes] = await Promise.all([fetch(marineUrl), fetch(windUrl)]);
-    const marineJson = await marineRes.json();
-    const windJson   = await windRes.json();
-
-    if (!marineJson.hourly || !windJson.hourly) return res.status(502).json({ error: "Sem dados para essa data." });
-
-    const dirs = ["N","NE","E","SE","S","SO","O","NO"];
-
-    // Gera dados hora a hora (0-23)
-    const hours = [];
-    for (let i = 0; i < 24; i++) {
-      const waveHeight  = marineJson.hourly.wave_height?.[i] ?? null;
-      const wavePeriod  = marineJson.hourly.wave_period?.[i] ?? null;
-      const swellHeight = marineJson.hourly.swell_wave_height?.[i] ?? null;
-      const swellPeriod = marineJson.hourly.swell_wave_period?.[i] ?? null;
-      const swellDirDeg = marineJson.hourly.swell_wave_direction?.[i] ?? null;
-      const windSpeed   = windJson.hourly.wind_speed_10m?.[i] ?? null;
-      const windDirDeg  = windJson.hourly.wind_direction_10m?.[i] ?? null;
-
-      const windDir  = windDirDeg  != null ? dirs[Math.round(windDirDeg  / 45) % 8] : "—";
-      const swellDir = swellDirDeg != null ? dirs[Math.round(swellDirDeg / 45) % 8] : "—";
-      const windType = getWindType(windDirDeg, swellDirDeg);
-      const { score: swellEnergy, kj: swellKj } = calcSwellEnergy(swellHeight, swellPeriod);
-      const cond = classify({ swellHeight, swellPeriod, waveHeight, windSpeed, windType });
-
-      hours.push({
-        hour: i,
-        cond,
-        height:      waveHeight  ? waveHeight.toFixed(1)  : "0.0",
-        swellHeight: swellHeight ? swellHeight.toFixed(1) : "0.0",
-        swellPeriod: swellPeriod ? Math.round(swellPeriod) : 0,
-        swellDir,
-        swellEnergy,
-        swellKj,
-        windSpeed:   windSpeed   ? Math.round(windSpeed)  : 0,
-        windDir,
-        windType,
-        period:      wavePeriod  ? Math.round(wavePeriod) : 0,
-      });
-    }
-
-    // Calcula veredito do dia (média 6h-18h)
-    const dayHours = hours.filter(h => h.hour >= 6 && h.hour <= 18);
-    const condOrder = { storm: 0, bom: 1, marola: 2, flat: 3 };
-    const dayCond = dayHours.reduce((best, h) =>
-      (condOrder[h.cond] ?? 99) < (condOrder[best.cond] ?? 99) ? h : best
-    , dayHours[0]).cond;
-
-    // Melhor bloco do dia (sequência mais longa de "bom")
-    let bestStart = null, bestEnd = null, curStart = null;
-    dayHours.forEach((h, i) => {
-      if (h.cond === "bom" || h.cond === "storm") {
-        if (curStart === null) curStart = h.hour;
-        bestStart = curStart; bestEnd = h.hour;
-      } else { curStart = null; }
-    });
-
-    const data = { beach, date, cond: dayCond, bestStart, bestEnd, hours };
-    cache[cacheKey] = { data, expiresAt: getMidnightUTC() };
-    res.json(data);
-
+    const data = await getForecastData(beach, date);
+    const cached = isCacheValid(cache[`forecast|${beach}|${date}`]);
+    res.json({ ...data, cached });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Erro ao buscar dados." });
   }
 });
 
+// ─── /forecast-all ───────────────────────────────────────────────────────────
+app.get("/forecast-all", async (req, res) => {
+  const { date } = req.query;
+  if (!date) return res.status(400).json({ error: "Data obrigatória." });
+
+  const results = await Promise.allSettled(
+    Object.keys(BEACHES).map(beach => getForecastData(beach, date))
+  );
+
+  const data = results
+    .map((r, i) => r.status === "fulfilled" ? r.value : null)
+    .filter(Boolean);
+
+  res.json({ date, beaches: data });
+});
+
+// ─── /tide ───────────────────────────────────────────────────────────────────
 app.get("/tide", async (req, res) => {
   const { date, beach } = req.query;
   if (!date) return res.status(400).json({ error: "Data obrigatória." });
