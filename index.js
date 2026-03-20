@@ -127,9 +127,20 @@ async function getForecastData(beach, date) {
 
   const dayHours = hours.filter(h => h.hour >= 6 && h.hour <= 18);
   const condOrder = { storm: 0, bom: 1, marola: 2, flat: 3 };
-  const dayCond = dayHours.reduce((best, h) =>
-    (condOrder[h.cond] ?? 99) < (condOrder[best.cond] ?? 99) ? h : best
+
+  const bestCond = dayHours.reduce((best, h) =>
+  (condOrder[h.cond] ?? 99) < (condOrder[best.cond] ?? 99) ? h : best
   , dayHours[0]).cond;
+
+  // Só classifica como Bom/Storm se houver janela mínima de 3h consecutivas
+  const MIN_WINDOW = 3;
+  let maxRun = 0, curRun = 0;
+  for (const h of dayHours) {
+    if (["bom", "storm"].includes(h.cond)) { curRun++; maxRun = Math.max(maxRun, curRun); }
+    else curRun = 0;
+  }
+  const hasGoodWindow = maxRun >= MIN_WINDOW;
+  const dayCond = hasGoodWindow ? bestCond : (["bom", "storm"].includes(bestCond) ? "marola" : bestCond);
 
   let bestStart = null, bestEnd = null, curStart = null;
   dayHours.forEach(h => {
