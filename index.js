@@ -1,36 +1,50 @@
 const express = require("express");
 const cors = require("cors");
 const fetch = require("node-fetch");
-const Database = require("better-sqlite3");
+const initSqlJs = require("sql.js");
+const fs = require("fs");
 const path = require("path");
 
 const app = express();
 app.use(cors({ origin: "*" }));
 
 // ─── SQLite (tábua de marés local) ───────────────────────────────────────────
-const db = new Database(path.join(__dirname, "taubinha.sqlite"), { readonly: true });
+let db = null;
 
-const TIDE_QUERY = db.prepare(`
-  SELECT h.hour, h.level
-  FROM hour_data h
-  JOIN day_data d   ON h.day_data_id   = d.id
-  JOIN month_data m ON d.month_data_id = m.id
-  JOIN data_mare dm ON m.data_mare_id  = dm.id
-  WHERE dm.id_harbor_state = ? AND dm.year = ? AND m.month = ? AND d.day = ?
-  ORDER BY h.hour
-`);
+async function getDB() {
+  if (db) return db;
+  const SQL = await initSqlJs();
+  const buf = fs.readFileSync(path.join(__dirname, "taubinha.sqlite"));
+  db = new SQL.Database(buf);
+  return db;
+}
 
-function getTideFromSQLite(harbor, date) {
+async function getTideFromSQLite(harbor, date) {
+  const database = await getDB();
   const dateObj = new Date(date + "T12:00:00");
   const year  = dateObj.getFullYear();
   const month = dateObj.getMonth() + 1;
   const day   = dateObj.getDate();
 
-  const rows = TIDE_QUERY.all(harbor, year, month, day);
+  const stmt = database.prepare(`
+    SELECT h.hour, h.level
+    FROM hour_data h
+    JOIN day_data d   ON h.day_data_id   = d.id
+    JOIN month_data m ON d.month_data_id = m.id
+    JOIN data_mare dm ON m.data_mare_id  = dm.id
+    WHERE dm.id_harbor_state = :harbor AND dm.year = :year AND m.month = :month AND d.day = :day
+    ORDER BY h.hour
+  `);
+
+  stmt.bind({ ':harbor': harbor, ':year': year, ':month': month, ':day': day });
+  const rows = [];
+  while (stmt.step()) rows.push(stmt.getAsObject());
+  stmt.free();
+
   if (!rows.length) return null;
 
   return rows.map(r => ({
-    hour:  r.hour.substring(0, 5),          // "HH:MM:SS" → "HH:MM"
+    hour:  r.hour.substring(0, 5),
     level: parseFloat(r.level.toFixed(2)),
   }));
 }
@@ -41,13 +55,23 @@ const BEACHES = {
   "Paiva":             { lat: -8.3108,  lng: -34.9700, state: "pe", harbor: "pe03" },
   "Itapuama":          { lat: -8.3989,  lng: -35.0286, state: "pe", harbor: "pe03" },
   "Porto de Galinhas": { lat: -8.5075,  lng: -35.0028, state: "pe", harbor: "pe03" },
-  "Maracaípe":         { lat: -8.5328,  lng: -35.0072, state: "pe", harbor: "pe03" },
+  "Maracaipe":         { lat: -8.5328,  lng: -35.0072, state: "pe", harbor: "pe03" },
   "Madeiro":           { lat: -6.2283,  lng: -35.0508, state: "rn", harbor: "rn04" },
-  "Baía Formosa":      { lat: -6.3728,  lng: -35.0089, state: "rn", harbor: "rn04" },
+  "Baia Formosa":      { lat: -6.3728,  lng: -35.0089, state: "rn", harbor: "rn04" },
   "Cacimba do Padre":  { lat: -3.8397,  lng: -32.4203, state: "pe", harbor: "pe01" },
   "Jericoacoara":      { lat: -2.7975,  lng: -40.5128, state: "ce", harbor: "ce01" },
   "Tourinhos":         { lat: -5.1089,  lng: -35.4908, state: "rn", harbor: "rn04" },
 };
+
+// Versão com acentos para lookup
+const BEACH_ALIASES = {
+  "Maracaípe": "Maracaipe",
+  "Baía Formosa": "Baia Formosa",
+};
+
+function getBeach(name) {
+  return BEACHES[name] || BEACHES[BEACH_ALIASES[name]];
+}
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
 
@@ -117,7 +141,8 @@ async function getForecastData(beach, date) {
   const cacheKey = `forecast|${beach}|${date}`;
   if (isCacheValid(cache[cacheKey])) return cache[cacheKey].data;
 
-  const { lat, lng } = BEACHES[beach];
+  const beachData = getBeach(beach);
+  const { lat, lng } = beachData;
   const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&hourly=wave_height,wave_period,swell_wave_height,swell_wave_period,swell_wave_direction&timezone=America%2FRecife&start_date=${date}&end_date=${date}`;
   const windUrl   = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=wind_speed_10m,wind_direction_10m&timezone=America%2FRecife&start_date=${date}&end_date=${date}`;
 
@@ -148,16 +173,16 @@ async function getForecastData(beach, date) {
     hours.push({
       hour: i,
       cond,
-      height:      waveHeight  ? waveHeight.toFixed(1)       : "0.0",
-      swellHeight: swellHeight ? swellHeight.toFixed(1)      : "0.0",
-      swellPeriod: swellPeriod ? Math.round(swellPeriod)     : 0,
+      height:      waveHeight  ? waveHeight.toFixed(1)   : "0.0",
+      swellHeight: swellHeight ? swellHeight.toFixed(1)  : "0.0",
+      swellPeriod: swellPeriod ? Math.round(swellPeriod) : 0,
       swellDir,
       swellEnergy,
       swellKj,
-      windSpeed:   windSpeed   ? Math.round(windSpeed)       : 0,
+      windSpeed:   windSpeed   ? Math.round(windSpeed)   : 0,
       windDir,
       windType,
-      period:      wavePeriod  ? Math.round(wavePeriod)      : 0,
+      period:      wavePeriod  ? Math.round(wavePeriod)  : 0,
     });
   }
 
@@ -200,7 +225,7 @@ app.get("/clear-cache", (req, res) => {
 
 app.get("/forecast", async (req, res) => {
   const { beach, date } = req.query;
-  if (!beach || !BEACHES[beach]) return res.status(400).json({ error: "Praia inválida." });
+  if (!beach || !getBeach(beach)) return res.status(400).json({ error: "Praia inválida." });
   if (!date) return res.status(400).json({ error: "Data obrigatória." });
   try {
     const data = await getForecastData(beach, date);
@@ -222,16 +247,17 @@ app.get("/forecast-all", async (req, res) => {
 });
 
 // ─── /tide — lê do SQLite local, sem dependência externa ─────────────────────
-app.get("/tide", (req, res) => {
+app.get("/tide", async (req, res) => {
   const { date, beach } = req.query;
   if (!date) return res.status(400).json({ error: "Data obrigatória." });
 
-  const harbor   = (beach && BEACHES[beach]) ? BEACHES[beach].harbor : "pe03";
-  const cacheKey = `tide|${harbor}|${date}`;
+  const beachData = beach ? getBeach(beach) : null;
+  const harbor    = beachData ? beachData.harbor : "pe03";
+  const cacheKey  = `tide|${harbor}|${date}`;
   if (isCacheValid(cache[cacheKey])) return res.json({ ...cache[cacheKey].data, cached: true });
 
   try {
-    const tides = getTideFromSQLite(harbor, date);
+    const tides = await getTideFromSQLite(harbor, date);
     if (!tides) return res.status(404).json({ error: "Sem dados de maré para essa data." });
 
     const data = { date, harbor, tides };
