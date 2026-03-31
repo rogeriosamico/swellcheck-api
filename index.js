@@ -1,9 +1,41 @@
 const express = require("express");
 const cors = require("cors");
 const fetch = require("node-fetch");
+const Database = require("better-sqlite3");
+const path = require("path");
 
 const app = express();
 app.use(cors({ origin: "*" }));
+
+// ─── SQLite (tábua de marés local) ───────────────────────────────────────────
+const db = new Database(path.join(__dirname, "taubinha.sqlite"), { readonly: true });
+
+const TIDE_QUERY = db.prepare(`
+  SELECT h.hour, h.level
+  FROM hour_data h
+  JOIN day_data d   ON h.day_data_id   = d.id
+  JOIN month_data m ON d.month_data_id = m.id
+  JOIN data_mare dm ON m.data_mare_id  = dm.id
+  WHERE dm.id_harbor_state = ? AND dm.year = ? AND m.month = ? AND d.day = ?
+  ORDER BY h.hour
+`);
+
+function getTideFromSQLite(harbor, date) {
+  const dateObj = new Date(date + "T12:00:00");
+  const year  = dateObj.getFullYear();
+  const month = dateObj.getMonth() + 1;
+  const day   = dateObj.getDate();
+
+  const rows = TIDE_QUERY.all(harbor, year, month, day);
+  if (!rows.length) return null;
+
+  return rows.map(r => ({
+    hour:  r.hour.substring(0, 5),          // "HH:MM:SS" → "HH:MM"
+    level: parseFloat(r.level.toFixed(2)),
+  }));
+}
+
+// ─── Dados das praias ─────────────────────────────────────────────────────────
 
 const BEACHES = {
   "Paiva":             { lat: -8.3108,  lng: -34.9700, state: "pe", harbor: "pe03" },
@@ -17,7 +49,8 @@ const BEACHES = {
   "Tourinhos":         { lat: -5.1089,  lng: -35.4908, state: "rn", harbor: "rn04" },
 };
 
-const TIDE_API = "https://tabuamare.devtu.qzz.io/api/v2";
+// ─── Cache ────────────────────────────────────────────────────────────────────
+
 const cache = {};
 
 function isCacheValid(entry) {
@@ -28,6 +61,8 @@ function getMidnightUTC() {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).getTime();
 }
+
+// ─── Helpers de forecast ──────────────────────────────────────────────────────
 
 function calcSwellEnergy(swellHeight, swellPeriod) {
   if (!swellHeight || !swellPeriod) return { score: 0, kj: 0 };
@@ -45,24 +80,24 @@ function getWindType(windDirDeg, swellDirDeg) {
   if (windDirDeg == null || swellDirDeg == null) return "cross";
   let diff = Math.abs(windDirDeg - swellDirDeg);
   if (diff > 180) diff = 360 - diff;
-  if (diff < 45) return "onshore";
+  if (diff < 45)  return "onshore";
   if (diff > 135) return "offshore";
   return "cross";
 }
 
 function classify({ swellHeight, swellPeriod, waveHeight, windSpeed, windType }) {
   if ((swellHeight == null || swellHeight < 0.2) && (waveHeight == null || waveHeight < 0.3)) return "flat";
-  const h = swellHeight || waveHeight || 0;
+  const h      = swellHeight || waveHeight || 0;
   const period = swellPeriod || 0;
-  const wind = windSpeed || 0;
+  const wind   = windSpeed   || 0;
   let base;
-  if (h < 0.3)       base = "flat";
-  else if (h < 0.8)  base = "marola";
-  else if (h < 1.6)  base = "bom";
-  else               base = "storm";
+  if (h < 0.3)      base = "flat";
+  else if (h < 0.8) base = "marola";
+  else if (h < 1.6) base = "bom";
+  else              base = "storm";
   const order = ["flat", "marola", "bom", "storm"];
   if (period >= 10 && base === "marola") base = "bom";
-  if (period < 6 && base === "bom")     base = "marola";
+  if (period < 6  && base === "bom")    base = "marola";
   if (windType === "onshore") {
     if (wind > 25) {
       if (base === "bom" || base === "storm") base = "storm";
@@ -76,7 +111,8 @@ function classify({ swellHeight, swellPeriod, waveHeight, windSpeed, windType })
   return base;
 }
 
-// ─── Lógica de forecast extraída para reuso ──────────────────────────────────
+// ─── Forecast ────────────────────────────────────────────────────────────────
+
 async function getForecastData(beach, date) {
   const cacheKey = `forecast|${beach}|${date}`;
   if (isCacheValid(cache[cacheKey])) return cache[cacheKey].data;
@@ -91,17 +127,17 @@ async function getForecastData(beach, date) {
 
   if (!marineJson.hourly || !windJson.hourly) throw new Error("Sem dados para essa data.");
 
-  const dirs = ["N","NE","E","SE","S","SO","O","NO"];
+  const dirs  = ["N","NE","E","SE","S","SO","O","NO"];
   const hours = [];
 
   for (let i = 0; i < 24; i++) {
-    const waveHeight  = marineJson.hourly.wave_height?.[i] ?? null;
-    const wavePeriod  = marineJson.hourly.wave_period?.[i] ?? null;
-    const swellHeight = marineJson.hourly.swell_wave_height?.[i] ?? null;
-    const swellPeriod = marineJson.hourly.swell_wave_period?.[i] ?? null;
+    const waveHeight  = marineJson.hourly.wave_height?.[i]          ?? null;
+    const wavePeriod  = marineJson.hourly.wave_period?.[i]          ?? null;
+    const swellHeight = marineJson.hourly.swell_wave_height?.[i]    ?? null;
+    const swellPeriod = marineJson.hourly.swell_wave_period?.[i]    ?? null;
     const swellDirDeg = marineJson.hourly.swell_wave_direction?.[i] ?? null;
-    const windSpeed   = windJson.hourly.wind_speed_10m?.[i] ?? null;
-    const windDirDeg  = windJson.hourly.wind_direction_10m?.[i] ?? null;
+    const windSpeed   = windJson.hourly.wind_speed_10m?.[i]         ?? null;
+    const windDirDeg  = windJson.hourly.wind_direction_10m?.[i]     ?? null;
 
     const windDir  = windDirDeg  != null ? dirs[Math.round(windDirDeg  / 45) % 8] : "—";
     const swellDir = swellDirDeg != null ? dirs[Math.round(swellDirDeg / 45) % 8] : "—";
@@ -112,27 +148,26 @@ async function getForecastData(beach, date) {
     hours.push({
       hour: i,
       cond,
-      height:      waveHeight  ? waveHeight.toFixed(1)  : "0.0",
-      swellHeight: swellHeight ? swellHeight.toFixed(1) : "0.0",
-      swellPeriod: swellPeriod ? Math.round(swellPeriod) : 0,
+      height:      waveHeight  ? waveHeight.toFixed(1)       : "0.0",
+      swellHeight: swellHeight ? swellHeight.toFixed(1)      : "0.0",
+      swellPeriod: swellPeriod ? Math.round(swellPeriod)     : 0,
       swellDir,
       swellEnergy,
       swellKj,
-      windSpeed:   windSpeed   ? Math.round(windSpeed)  : 0,
+      windSpeed:   windSpeed   ? Math.round(windSpeed)       : 0,
       windDir,
       windType,
-      period:      wavePeriod  ? Math.round(wavePeriod) : 0,
+      period:      wavePeriod  ? Math.round(wavePeriod)      : 0,
     });
   }
 
-  const dayHours = hours.filter(h => h.hour >= 6 && h.hour <= 18);
+  const dayHours  = hours.filter(h => h.hour >= 6 && h.hour <= 18);
   const condOrder = { storm: 0, bom: 1, marola: 2, flat: 3 };
 
   const bestCond = dayHours.reduce((best, h) =>
-  (condOrder[h.cond] ?? 99) < (condOrder[best.cond] ?? 99) ? h : best
+    (condOrder[h.cond] ?? 99) < (condOrder[best.cond] ?? 99) ? h : best
   , dayHours[0]).cond;
 
-  // Só classifica como Bom/Storm se houver janela mínima de 3h consecutivas
   const MIN_WINDOW = 3;
   let maxRun = 0, curRun = 0;
   for (const h of dayHours) {
@@ -155,7 +190,7 @@ async function getForecastData(beach, date) {
   return data;
 }
 
-// ─── Rotas ───────────────────────────────────────────────────────────────────
+// ─── Rotas ────────────────────────────────────────────────────────────────────
 
 app.get("/clear-cache", (req, res) => {
   const count = Object.keys(cache).length;
@@ -167,56 +202,37 @@ app.get("/forecast", async (req, res) => {
   const { beach, date } = req.query;
   if (!beach || !BEACHES[beach]) return res.status(400).json({ error: "Praia inválida." });
   if (!date) return res.status(400).json({ error: "Data obrigatória." });
-
   try {
     const data = await getForecastData(beach, date);
-    const cached = isCacheValid(cache[`forecast|${beach}|${date}`]);
-    res.json({ ...data, cached });
+    res.json({ ...data, cached: isCacheValid(cache[`forecast|${beach}|${date}`]) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Erro ao buscar dados." });
   }
 });
 
-// ─── /forecast-all ───────────────────────────────────────────────────────────
 app.get("/forecast-all", async (req, res) => {
   const { date } = req.query;
   if (!date) return res.status(400).json({ error: "Data obrigatória." });
-
   const results = await Promise.allSettled(
     Object.keys(BEACHES).map(beach => getForecastData(beach, date))
   );
-
-  const data = results
-    .map((r, i) => r.status === "fulfilled" ? r.value : null)
-    .filter(Boolean);
-
+  const data = results.map(r => r.status === "fulfilled" ? r.value : null).filter(Boolean);
   res.json({ date, beaches: data });
 });
 
-// ─── /tide ───────────────────────────────────────────────────────────────────
-app.get("/tide", async (req, res) => {
+// ─── /tide — lê do SQLite local, sem dependência externa ─────────────────────
+app.get("/tide", (req, res) => {
   const { date, beach } = req.query;
   if (!date) return res.status(400).json({ error: "Data obrigatória." });
 
-  const harbor = (beach && BEACHES[beach]) ? BEACHES[beach].harbor : "pe03";
+  const harbor   = (beach && BEACHES[beach]) ? BEACHES[beach].harbor : "pe03";
   const cacheKey = `tide|${harbor}|${date}`;
   if (isCacheValid(cache[cacheKey])) return res.json({ ...cache[cacheKey].data, cached: true });
 
-  const dateObj = new Date(date + "T12:00:00");
-  const month = dateObj.getMonth() + 1;
-  const day = dateObj.getDate();
-
   try {
-    const response = await fetch(`${TIDE_API}/tabua-mare/${harbor}/${month}/[${day}]`);
-    const json = await response.json();
-    const tideHours = json?.data?.[0]?.months?.[0]?.days?.[0]?.hours;
-    if (!tideHours) return res.status(502).json({ error: "Sem dados de maré para essa data." });
-
-    const tides = tideHours.map(h => ({
-      hour: h.hour.substring(0, 5),
-      level: parseFloat(h.level.toFixed(2)),
-    }));
+    const tides = getTideFromSQLite(harbor, date);
+    if (!tides) return res.status(404).json({ error: "Sem dados de maré para essa data." });
 
     const data = { date, harbor, tides };
     cache[cacheKey] = { data, expiresAt: getMidnightUTC() };
