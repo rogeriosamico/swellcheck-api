@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getForecastData } = require("../services/forecast");
 const { getBeach, BEACHES } = require("../data/beaches");
-const { cache, isCacheValid, get6hTTL } = require("../lib/cache");
+const { cache, isCacheValid, get6hTTL, saveToDisk } = require("../lib/cache");
 
 router.get("/forecast", async (req, res) => {
   const { beach, date } = req.query;
@@ -10,6 +10,7 @@ router.get("/forecast", async (req, res) => {
   if (!date) return res.status(400).json({ error: "Data obrigatória." });
   try {
     const data = await getForecastData(beach, date);
+    saveToDisk();
     res.json(data);
   } catch (err) {
     console.error(err);
@@ -32,8 +33,9 @@ router.get("/forecast-all", async (req, res) => {
 
   const response = { date, beaches: data, total: beachNames.length, loaded: data.length };
 
-  if (data.length === beachNames.length) {
+  if (data.length > 0) {
     cache[listKey] = { data: response, expiresAt: get6hTTL() };
+    saveToDisk();
   }
 
   res.json(response);
