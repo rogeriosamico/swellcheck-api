@@ -8,6 +8,8 @@ const BEACHES = {
   "Cacimba do Padre":  { lat: -3.8397,  lng: -32.4203, state: "pe", harbor: "pe01" },
   "Jericoacoara":      { lat: -2.7975,  lng: -40.5128, state: "ce", harbor: "ce01" },
   "Tourinhos":         { lat: -5.1089,  lng: -35.4908, state: "rn", harbor: "rn04" },
+  "Janga":             { lat: -7.9508,  lng: -34.8267, state: "pe", harbor: "pe02" },
+  "Olinda":            { lat: -7.9908,  lng: -34.8416, state: "pe", harbor: "pe02" },
 };
 
 function getBeach(name) {
