@@ -1,6 +1,12 @@
 const fetch = require("node-fetch");
 const { getBeach } = require("../data/beaches");
-const { cache, isCacheValid, getMidnightUTC } = require("../lib/cache");
+const { cache, isCacheValid, get6hTTL } = require("../lib/cache");
+
+function fetchWithTimeout(url, ms = 8000) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(id));
+}
 
 function calcSwellEnergy(swellHeight, swellPeriod) {
   if (!swellHeight || !swellPeriod) return { score: 0, kj: 0 };
@@ -57,7 +63,7 @@ async function getForecastData(beach, date) {
   const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&hourly=wave_height,wave_period,swell_wave_height,swell_wave_period,swell_wave_direction&timezone=America%2FRecife&start_date=${date}&end_date=${date}`;
   const windUrl   = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=wind_speed_10m,wind_direction_10m&timezone=America%2FRecife&start_date=${date}&end_date=${date}`;
 
-  const [marineRes, windRes] = await Promise.all([fetch(marineUrl), fetch(windUrl)]);
+  const [marineRes, windRes] = await Promise.all([fetchWithTimeout(marineUrl), fetchWithTimeout(windUrl)]);
   const marineJson = await marineRes.json();
   const windJson   = await windRes.json();
 
@@ -122,7 +128,7 @@ async function getForecastData(beach, date) {
   });
 
   const data = { beach, date, cond: dayCond, bestStart, bestEnd, hours };
-  cache[cacheKey] = { data, expiresAt: getMidnightUTC() };
+  cache[cacheKey] = { data, expiresAt: get6hTTL() };
   return { ...data, cached: false };
 }
 

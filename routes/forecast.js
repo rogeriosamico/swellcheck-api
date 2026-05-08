@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getForecastData } = require("../services/forecast");
 const { getBeach, BEACHES } = require("../data/beaches");
+const { cache, isCacheValid, get6hTTL } = require("../lib/cache");
 
 router.get("/forecast", async (req, res) => {
   const { beach, date } = req.query;
@@ -19,11 +20,23 @@ router.get("/forecast", async (req, res) => {
 router.get("/forecast-all", async (req, res) => {
   const { date } = req.query;
   if (!date) return res.status(400).json({ error: "Data obrigatória." });
-  const results = await Promise.allSettled(
-    Object.keys(BEACHES).map(beach => getForecastData(beach, date))
-  );
+
+  const listKey = `forecast-all|${date}`;
+  if (isCacheValid(cache[listKey])) {
+    return res.json(cache[listKey].data);
+  }
+
+  const beachNames = Object.keys(BEACHES);
+  const results = await Promise.allSettled(beachNames.map(beach => getForecastData(beach, date)));
   const data = results.map(r => r.status === "fulfilled" ? r.value : null).filter(Boolean);
-  res.json({ date, beaches: data });
+
+  const response = { date, beaches: data, total: beachNames.length, loaded: data.length };
+
+  if (data.length === beachNames.length) {
+    cache[listKey] = { data: response, expiresAt: get6hTTL() };
+  }
+
+  res.json(response);
 });
 
 module.exports = router;

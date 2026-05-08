@@ -2,7 +2,7 @@ const initSqlJs = require("sql.js");
 const fs = require("fs");
 const path = require("path");
 const { getBeach } = require("../data/beaches");
-const { cache, isCacheValid, getMidnightUTC } = require("../lib/cache");
+const { cache, isCacheValid, get6hTTL } = require("../lib/cache");
 
 let db = null;
 
@@ -55,7 +55,7 @@ async function getTideData(date, beachName) {
   if (!tides) return null;
 
   const data = { date, harbor, tides };
-  cache[cacheKey] = { data, expiresAt: getMidnightUTC() };
+  cache[cacheKey] = { data, expiresAt: get6hTTL() };
   return data;
 }
 
