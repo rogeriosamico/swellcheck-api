@@ -2,7 +2,7 @@ const fetch = require("node-fetch");
 const { getBeach } = require("../data/beaches");
 const { cache, isCacheValid, get6hTTL } = require("../lib/cache");
 
-function fetchWithTimeout(url, ms = 8000) {
+function fetchWithTimeout(url, ms = 12000) {
   const ctrl = new AbortController();
   const id = setTimeout(() => ctrl.abort(), ms);
   return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(id));

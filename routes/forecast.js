@@ -18,6 +18,16 @@ router.get("/forecast", async (req, res) => {
   }
 });
 
+async function allSettledInBatches(items, fn, batchSize = 4) {
+  const results = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.allSettled(batch.map(fn));
+    results.push(...batchResults);
+  }
+  return results;
+}
+
 router.get("/forecast-all", async (req, res) => {
   const { date } = req.query;
   if (!date) return res.status(400).json({ error: "Data obrigatória." });
@@ -28,13 +38,15 @@ router.get("/forecast-all", async (req, res) => {
   }
 
   const beachNames = Object.keys(BEACHES);
-  const results = await Promise.allSettled(beachNames.map(beach => getForecastData(beach, date)));
+  const results = await allSettledInBatches(beachNames, beach => getForecastData(beach, date), 4);
   const data = results.map(r => r.status === "fulfilled" ? r.value : null).filter(Boolean);
 
   const response = { date, beaches: data, total: beachNames.length, loaded: data.length };
 
-  if (data.length > 0) {
+  if (data.length === beachNames.length) {
     cache[listKey] = { data: response, expiresAt: get6hTTL() };
+  }
+  if (data.length > 0) {
     saveToDisk();
   }
 
