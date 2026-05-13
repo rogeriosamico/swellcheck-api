@@ -10,6 +10,9 @@ const BEACHES = {
   "Tourinhos":         { lat: -5.1089,  lng: -35.4908, state: "rn", harbor: "rn04" },
   "Janga":             { lat: -7.9508,  lng: -34.8267, state: "pe", harbor: "pe02" },
   "Olinda":            { lat: -7.9908,  lng: -34.8416, state: "pe", harbor: "pe02" },
+  "Ponta Negra":       { lat: -5.8906,  lng: -35.1778, state: "rn", harbor: "rn04" },
+  "Praia do Francês":  { lat: -9.6617,  lng: -35.8406, state: "al", harbor: "al01" },
+  "Japaratinga":       { lat: -9.0839,  lng: -35.2489, state: "al", harbor: "al01" },
 };
 
 function getBeach(name) {
