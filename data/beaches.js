@@ -25,7 +25,7 @@ const BEACHES = {
   "Praia do Forte":         { lat: -12.5778, lng: -37.9742, state: "ba", harbor: "ba01" },
   "Prado - Corumbau":       { lat: -17.3428, lng: -39.2178, state: "ba", harbor: "ba04" },
   "Serrambi":               { lat: -8.7822,  lng: -35.0386, state: "pe", harbor: "pe03" },
-  "Praia da Conceição":     { lat: -7.8711,  lng: -34.8483, state: "pe", harbor: "pe02" },
+  "Praia da Conceição":     { lat: -3.8553,  lng: -32.4103, state: "pe", harbor: "pe01" },
   "Praia do Amor":          { lat: -6.1886,  lng: -35.0878, state: "rn", harbor: "rn04" },
   "São Miguel do Gostoso":  { lat: -5.1236,  lng: -35.6411, state: "rn", harbor: "rn04" },
   "Intermares":             { lat: -6.9786,  lng: -34.8261, state: "pb", harbor: "pb01" },
