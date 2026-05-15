@@ -61,7 +61,7 @@ async function getForecastData(beach, date) {
 
   const { lat, lng } = getBeach(beach);
   const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&hourly=wave_height,wave_period,swell_wave_height,swell_wave_period,swell_wave_direction&timezone=America%2FRecife&start_date=${date}&end_date=${date}`;
-  const windUrl   = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=wind_speed_10m,wind_direction_10m&timezone=America%2FRecife&start_date=${date}&end_date=${date}`;
+  const windUrl   = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=wind_speed_10m,wind_direction_10m,temperature_2m,weather_code&timezone=America%2FRecife&start_date=${date}&end_date=${date}`;
 
   const [marineRes, windRes] = await Promise.all([fetchWithTimeout(marineUrl), fetchWithTimeout(windUrl)]);
   const marineJson = await marineRes.json();
@@ -80,6 +80,8 @@ async function getForecastData(beach, date) {
     const swellDirDeg = marineJson.hourly.swell_wave_direction?.[i] ?? null;
     const windSpeed   = windJson.hourly.wind_speed_10m?.[i]         ?? null;
     const windDirDeg  = windJson.hourly.wind_direction_10m?.[i]     ?? null;
+    const temperature = windJson.hourly.temperature_2m?.[i]         ?? null;
+    const weatherCode = windJson.hourly.weather_code?.[i]           ?? null;
 
     const windDir  = windDirDeg  != null ? dirs[Math.round(windDirDeg  / 45) % 8] : "—";
     const swellDir = swellDirDeg != null ? dirs[Math.round(swellDirDeg / 45) % 8] : "—";
@@ -100,6 +102,8 @@ async function getForecastData(beach, date) {
       windDir,
       windType,
       period:      wavePeriod  ? Math.round(wavePeriod)  : 0,
+      temperature: temperature != null ? Math.round(temperature) : null,
+      weatherCode: weatherCode ?? null,
     });
   }
 
