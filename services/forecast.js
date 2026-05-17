@@ -113,13 +113,10 @@ async function getForecastData(beach, date) {
     const swellDir = swellDirDeg != null ? dirs[Math.round(swellDirDeg / 45) % 8] : "—";
     const swell2Dir = swell2DirDeg != null ? dirs[Math.round(swell2DirDeg / 45) % 8] : "—";
     const windType = getWindType(windDirDeg, swellDirDeg);
-    const isEffective2 = beachProfile &&
-      swell2Dir && swell2Dir !== "—" &&
-      beachProfile.idealSwellDirs?.includes(swell2Dir) &&
-      swell2Period >= (beachProfile.minPeriodSecondary ?? beachProfile.minPeriod ?? 0);
-    const energyHeight = isEffective2 ? swell2Height : swellHeight;
-    const energyPeriod = isEffective2 ? swell2Period  : swellPeriod;
-    const { score: swellEnergy, kj: swellKj } = calcSwellEnergy(energyHeight, energyPeriod);
+    const { score: energy1, kj: kj1 } = calcSwellEnergy(swellHeight, swellPeriod);
+    const { score: energy2, kj: kj2 } = calcSwellEnergy(swell2Height, swell2Period);
+    const swellEnergy = kj2 > kj1 ? energy2 : energy1;
+    const swellKj     = kj2 > kj1 ? kj2     : kj1;
     const baseCond = classify({ swellHeight, swellPeriod, waveHeight, windSpeed, windType });
     const cond = applyBeachProfile(baseCond, swellDir, swellPeriod, swell2Dir, swell2Period, beachProfile);
 
