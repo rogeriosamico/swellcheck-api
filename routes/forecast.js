@@ -9,8 +9,9 @@ router.get("/forecast", async (req, res) => {
   if (!beach || !getBeach(beach)) return res.status(400).json({ error: "Praia inválida." });
   if (!date) return res.status(400).json({ error: "Data obrigatória." });
   try {
-    const data = await getForecastData(beach, date);
-    saveToDisk();
+    const debug = req.query.debug === "1";
+    const data = await getForecastData(beach, date, { debug });
+    if (!debug) saveToDisk();
     res.json(data);
   } catch (err) {
     console.error(err);
