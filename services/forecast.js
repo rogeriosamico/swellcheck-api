@@ -350,6 +350,7 @@ async function getForecastData(beach, date, { debug = false } = {}) {
       period:       wavePeriod  ? Math.round(wavePeriod)  : 0,
       temperature:  temperature != null ? Math.round(temperature) : null,
       weatherCode:  weatherCode ?? null,
+      isDay:        i >= sunriseHour && i < sunsetHour,
     };
 
     if (debug) {
