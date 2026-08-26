@@ -1,6 +1,7 @@
 const initSqlJs = require("sql.js");
 const fs = require("fs");
 const path = require("path");
+const fetch = require("node-fetch");
 const { getBeach } = require("../data/beaches");
 const { cache, isCacheValid, get6hTTL } = require("../lib/cache");
 
@@ -44,17 +45,67 @@ async function getTideFromSQLite(harbor, date) {
   }));
 }
 
+// Extrai só os picos/vales (preamar/baixa-mar) de uma série horária — mesmo formato
+// das tábuas oficiais BR (poucos pontos por dia, não uma leitura por hora).
+// Refina a hora de cada extremo por interpolação parabólica nos 3 pontos ao redor,
+// pra imitar a precisão de minuto das tábuas ("02:47") em vez de horas cheias.
+function findTideExtrema(levels) {
+  const points = [];
+  for (let i = 1; i < levels.length - 1; i++) {
+    const prev = levels[i - 1], cur = levels[i], next = levels[i + 1];
+    if (prev == null || cur == null || next == null) continue;
+    const isMax = cur > prev && cur >= next;
+    const isMin = cur < prev && cur <= next;
+    if (!isMax && !isMin) continue;
+
+    const denom = prev - 2 * cur + next;
+    const dx = denom !== 0 ? 0.5 * (prev - next) / denom : 0;
+    const offset = Math.max(-0.5, Math.min(0.5, dx));
+    const refinedHour  = i + offset;
+    const refinedLevel = cur - 0.25 * (prev - next) * offset;
+
+    points.push({ hourFloat: refinedHour, level: parseFloat(refinedLevel.toFixed(2)) });
+  }
+  return points;
+}
+
+function hourFloatToStr(hourFloat) {
+  const total = Math.round(hourFloat * 60);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+// Maré modelada do Open-Meteo Marine API — usada para praias sem tábua BR (ex.: Portugal).
+async function getTideFromOpenMeteo(lat, lng, timezone, date) {
+  const tz = encodeURIComponent(timezone || "UTC");
+  const url = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&hourly=sea_level_height_msl&timezone=${tz}&start_date=${date}&end_date=${date}`;
+  const res = await fetch(url);
+  const json = await res.json();
+  const levels = json?.hourly?.sea_level_height_msl;
+  if (!Array.isArray(levels) || levels.filter(v => v != null).length < 2) return null;
+
+  const extrema = findTideExtrema(levels);
+  if (extrema.length < 2) return null;
+
+  return extrema.map(p => ({ hour: hourFloatToStr(p.hourFloat), level: p.level }));
+}
+
 async function getTideData(date, beachName) {
   const beachData = beachName ? getBeach(beachName) : null;
-  const harbor    = beachData ? beachData.harbor : "pe03";
-  const cacheKey  = `tide|${harbor}|${date}`;
+  if (!beachData) return null;
+
+  const harbor   = beachData.harbor;
+  const cacheKey = harbor ? `tide|${harbor}|${date}` : `tide|om|${beachName}|${date}`;
 
   if (isCacheValid(cache[cacheKey])) return { ...cache[cacheKey].data, cached: true };
 
-  const tides = await getTideFromSQLite(harbor, date);
+  const tides = harbor
+    ? await getTideFromSQLite(harbor, date)
+    : await getTideFromOpenMeteo(beachData.lat, beachData.lng, beachData.timezone, date);
   if (!tides) return null;
 
-  const data = { date, harbor, tides };
+  const data = { date, harbor: harbor ?? null, tides };
   cache[cacheKey] = { data, expiresAt: get6hTTL() };
   return data;
 }

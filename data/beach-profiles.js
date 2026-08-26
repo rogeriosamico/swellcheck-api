@@ -372,6 +372,58 @@ const BEACH_PROFILES = {
     badTide:   ["low", "high"],
   },
 
+  // ─── Portugal ──────────────────────────────────────────────────────────────
+  // Não validado (baseado em surf guides públicos, sem monitoramento local).
+
+  // Reef/point break de Ericeira — a mais consistente das praias de teste
+  // Fonte: surf-forecast.com, guia de Ericeira — NO/O ideal, offshore de leste, funciona em quase toda maré
+  "Ribeira d'Ilhas": {
+    idealSwellDirs: ["NO", "O"],
+    minPeriod: 10,
+    idealTide: ["mid"],
+  },
+
+  // Beach break de Peniche — um dos barrels mais fortes da Europa
+  // Fonte: surf-forecast.com, reservasdesurf — S/SO/O ideal, swell muito de N fica na sombra
+  "Supertubos": {
+    idealSwellDirs: ["SO", "O"],
+    minPeriod: 9,
+    badSwellDirs: ["NO"],
+    idealTide: ["mid"],
+  },
+
+  // Big-wave spot amplificado pelo Canhão da Nazaré — ver ressalva em DISCOVERY_PORTUGAL.md/BEACHES.md
+  // Fonte: surfline.com, praiadonorte.pt — NO, período longo, maré baixa
+  "Nazaré": {
+    idealSwellDirs: ["NO"],
+    minPeriod: 14,
+    idealTide: ["low"],
+  },
+
+  // Beach break grande e versátil de Colares — a mais consistente da região, absorve swell de várias direções
+  // Fonte: surf-forecast.com, wannasurf — NO/O ideal, offshore de leste, várias escolas de surf na praia
+  "Praia Grande": {
+    idealSwellDirs: ["NO", "O"],
+    minPeriod: 8,
+    idealTide: ["mid"],
+  },
+
+  // Vizinha da Praia Grande, mais protegida — perfil clássico de iniciante/longboard, várias escolas de surf
+  // Fonte: surf-forecast.com, guias de escolas de surf de Sintra — NO/O ideal, funciona bem em maré baixa/média
+  "Praia das Maçãs": {
+    idealSwellDirs: ["NO", "O"],
+    minPeriod: 8,
+    idealTide: ["low", "mid"],
+  },
+
+  // Beach break protegido por falésias ao norte de Colares — bom para longboard/iniciante, escola de surf local
+  // Fonte: surf-forecast.com, wannasurf — NO/O ideal, mid tide evita expor pedras do banco
+  "Praia do Magoito": {
+    idealSwellDirs: ["NO", "O"],
+    minPeriod: 8,
+    idealTide: ["mid"],
+  },
+
 };
 
 module.exports = { BEACH_PROFILES };

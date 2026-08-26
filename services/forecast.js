@@ -242,11 +242,12 @@ async function getForecastData(beach, date, { debug = false } = {}) {
   const cacheKey = `forecast|${beach}|${date}`;
   if (!debug && isCacheValid(cache[cacheKey])) return { ...cache[cacheKey].data, cached: true };
 
-  const { lat, lng } = getBeach(beach);
+  const { lat, lng, timezone } = getBeach(beach);
   const beachProfile = BEACH_PROFILES[beach] ?? null;
+  const tz = encodeURIComponent(timezone || "America/Recife");
 
-  const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&hourly=wave_height,wave_period,swell_wave_height,swell_wave_period,swell_wave_direction,secondary_swell_wave_height,secondary_swell_wave_period,secondary_swell_wave_direction&timezone=America%2FRecife&start_date=${date}&end_date=${date}`;
-  const windUrl   = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=wind_speed_10m,wind_direction_10m,temperature_2m,weather_code&daily=sunrise,sunset&timezone=America%2FRecife&start_date=${date}&end_date=${date}`;
+  const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&hourly=wave_height,wave_period,swell_wave_height,swell_wave_period,swell_wave_direction,secondary_swell_wave_height,secondary_swell_wave_period,secondary_swell_wave_direction,sea_level_height_msl&timezone=${tz}&start_date=${date}&end_date=${date}`;
+  const windUrl   = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=wind_speed_10m,wind_direction_10m,temperature_2m,weather_code&daily=sunrise,sunset&timezone=${tz}&start_date=${date}&end_date=${date}`;
 
   const [marineRes, windRes] = await Promise.all([fetchWithTimeout(marineUrl), fetchWithTimeout(windUrl)]);
   const marineJson = await marineRes.json();
@@ -259,7 +260,7 @@ async function getForecastData(beach, date, { debug = false } = {}) {
   const sunsetHour = windJson.daily?.sunset?.[0]
     ? new Date(windJson.daily.sunset[0]).getHours() : 18;
 
-  // Maré: tenta carregar pontos do dia; ignora erros silenciosamente
+  // Maré: tenta carregar pontos do dia via SQLite (praias BR); ignora erros silenciosamente
   let tidePts = null;
   let tideMin = 0, tideMax = 1;
   try {
@@ -271,6 +272,17 @@ async function getForecastData(beach, date, { debug = false } = {}) {
       tideMax = Math.max(...levels);
     }
   } catch (_) { /* praia sem harbor ou SQLite indisponível — continua sem maré */ }
+
+  // Praia sem harbor BR (ex.: Portugal) — usa maré modelada do Open-Meteo (mesma chamada, já hourly)
+  let openMeteoTideLevels = null;
+  if (!tidePts && Array.isArray(marineJson.hourly.sea_level_height_msl)) {
+    const levels = marineJson.hourly.sea_level_height_msl.filter(v => v != null);
+    if (levels.length >= 2) {
+      openMeteoTideLevels = marineJson.hourly.sea_level_height_msl;
+      tideMin = Math.min(...levels);
+      tideMax = Math.max(...levels);
+    }
+  }
 
   const dirs  = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"];
   const hours = [];
@@ -328,6 +340,9 @@ async function getForecastData(beach, date, { debug = false } = {}) {
     let tidePhase = null;
     if (tidePts) {
       tideLevel = interpolateTideLevel(tidePts, i);
+      tidePhase = getTidePhase(tideLevel, tideMin, tideMax);
+    } else if (openMeteoTideLevels && openMeteoTideLevels[i] != null) {
+      tideLevel = openMeteoTideLevels[i];
       tidePhase = getTidePhase(tideLevel, tideMin, tideMax);
     }
     const cond = applyTideAdjustment(condAfterProfile, tidePhase, beachProfile, dominantPeriod);
