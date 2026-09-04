@@ -45,18 +45,42 @@ async function getTideFromSQLite(harbor, date) {
   }));
 }
 
+// Média móvel de 3 pontos (bordas replicam o valor da ponta) — usada só para achar
+// ONDE estão os extremos reais, sem achatar o valor/hora reportado (ver findTideExtrema).
+function smooth3(levels) {
+  return levels.map((cur, i) => {
+    const prev = levels[i - 1] ?? cur;
+    const next = levels[i + 1] ?? cur;
+    return (prev + cur + next) / 3;
+  });
+}
+
 // Extrai só os picos/vales (preamar/baixa-mar) de uma série horária — mesmo formato
 // das tábuas oficiais BR (poucos pontos por dia, não uma leitura por hora).
 // Refina a hora de cada extremo por interpolação parabólica nos 3 pontos ao redor,
 // pra imitar a precisão de minuto das tábuas ("02:47") em vez de horas cheias.
+//
+// A DETECÇÃO roda sobre a série suavizada (smooth3), não sobre os dados brutos: o
+// Open-Meteo é maré MODELADA, e em alguns pontos do globo (ex.: Mar do Norte) a série
+// horária tem pequenas ondulações de ruído do modelo — variações de poucos cm entre
+// horas vizinhas que passam no teste de "vizinho é maior/menor" mas não são preamar/
+// baixa-mar de verdade. Sem suavizar, isso gera extremos espúrios coladinhos (ex.: dois
+// pontos a 40min de distância), o que quebra o TideChart (labels de hora se sobrepõem —
+// ver BEACHES.md, seção "Como cadastrar uma nova praia com perfil"). A REFINAÇÃO
+// (offset/nível parabólico) continua usando os valores brutos ao redor do índice
+// encontrado, pra não perder precisão no número exibido.
 function findTideExtrema(levels) {
+  const smoothed = smooth3(levels);
   const points = [];
-  for (let i = 1; i < levels.length - 1; i++) {
+  for (let i = 1; i < smoothed.length - 1; i++) {
+    const sPrev = smoothed[i - 1], sCur = smoothed[i], sNext = smoothed[i + 1];
+    if (sPrev == null || sCur == null || sNext == null) continue;
+    const isMax = sCur > sPrev && sCur >= sNext;
+    const isMin = sCur < sPrev && sCur <= sNext;
+    if (!isMax && !isMin) continue;
+
     const prev = levels[i - 1], cur = levels[i], next = levels[i + 1];
     if (prev == null || cur == null || next == null) continue;
-    const isMax = cur > prev && cur >= next;
-    const isMin = cur < prev && cur <= next;
-    if (!isMax && !isMin) continue;
 
     const denom = prev - 2 * cur + next;
     const dx = denom !== 0 ? 0.5 * (prev - next) / denom : 0;
