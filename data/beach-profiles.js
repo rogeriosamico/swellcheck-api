@@ -424,6 +424,17 @@ const BEACH_PROFILES = {
     idealTide: ["mid"],
   },
 
+  // ─── Holanda ───────────────────────────────────────────────────────────────
+  // Não validado (baseado em surf guides públicos, sem monitoramento local).
+
+  // Beach/pier break do Mar do Norte — swell curto de windswell local, não groundswell atlântico
+  // Fonte: surf-forecast.com (Scheveningen Pier) — NO ideal, offshore de SE, melhor perto da maré cheia
+  "Scheveningen": {
+    idealSwellDirs: ["NO"],
+    minPeriod: 6,
+    idealTide: ["high"],
+  },
+
 };
 
 module.exports = { BEACH_PROFILES };

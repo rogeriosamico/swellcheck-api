@@ -41,6 +41,9 @@ const BEACHES = {
   "Praia Grande":      { lat: 38.8130, lng: -9.4720, state: "Lisboa", timezone: "Europe/Lisbon" },
   "Praia das Maçãs":   { lat: 38.8064, lng: -9.4694, state: "Lisboa", timezone: "Europe/Lisbon" },
   "Praia do Magoito":  { lat: 38.8385, lng: -9.4805, state: "Lisboa", timezone: "Europe/Lisbon" },
+
+  // ─── Holanda (teste de viagem — sem harbor, maré via Open-Meteo) ───────────
+  "Scheveningen":      { lat: 52.1092, lng: 4.2727, state: "Zuid-Holland", timezone: "Europe/Amsterdam" },
 };
 
 function getBeach(name) {
