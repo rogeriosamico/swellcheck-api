@@ -55,6 +55,33 @@ function smooth3(levels) {
   });
 }
 
+// Garante espaçamento mínimo entre extremos consecutivos — em costas com maré mais
+// "irregular" (ex.: patamar/oscilação perto da baixa-mar na costa holandesa, fenômeno
+// real chamado de "agger"), mesmo a série suavizada (smooth3) ainda pode ter dois ou
+// três extremos genuínos a menos de 1h um do outro, o que sobrepõe os labels do
+// TideChart. Quando dois pontos ficam mais perto que minGapHours, descarta o mais
+// próximo da média do dia e mantém o mais extremo (mais provável de ser a preamar/
+// baixa-mar real, não só uma oscilação local) — repete até todos os pontos restantes
+// ficarem espaçados o suficiente pra caber os labels de hora sem sobrepor.
+function enforceMinGap(points, levels, minGapHours = 3) {
+  if (points.length < 2) return points;
+  const valid = levels.filter(v => v != null);
+  const mean = valid.reduce((a, b) => a + b, 0) / valid.length;
+
+  const kept = points.slice();
+  for (let i = 1; i < kept.length; ) {
+    if (kept[i].hourFloat - kept[i - 1].hourFloat < minGapHours) {
+      const devPrev = Math.abs(kept[i - 1].level - mean);
+      const devCur  = Math.abs(kept[i].level - mean);
+      kept.splice(devPrev >= devCur ? i : i - 1, 1);
+      if (i > 1) i--; // re-check the new pair formed after removal
+    } else {
+      i++;
+    }
+  }
+  return kept;
+}
+
 // Extrai só os picos/vales (preamar/baixa-mar) de uma série horária — mesmo formato
 // das tábuas oficiais BR (poucos pontos por dia, não uma leitura por hora).
 // Refina a hora de cada extremo por interpolação parabólica nos 3 pontos ao redor,
@@ -68,7 +95,8 @@ function smooth3(levels) {
 // pontos a 40min de distância), o que quebra o TideChart (labels de hora se sobrepõem —
 // ver BEACHES.md, seção "Como cadastrar uma nova praia com perfil"). A REFINAÇÃO
 // (offset/nível parabólico) continua usando os valores brutos ao redor do índice
-// encontrado, pra não perder precisão no número exibido.
+// encontrado, pra não perder precisão no número exibido. Por fim, enforceMinGap cobre
+// os casos em que a suavização sozinha não é suficiente (ver comentário acima).
 function findTideExtrema(levels) {
   const smoothed = smooth3(levels);
   const points = [];
@@ -90,7 +118,7 @@ function findTideExtrema(levels) {
 
     points.push({ hourFloat: refinedHour, level: parseFloat(refinedLevel.toFixed(2)) });
   }
-  return points;
+  return enforceMinGap(points, levels);
 }
 
 function hourFloatToStr(hourFloat) {
